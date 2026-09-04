@@ -1,0 +1,1032 @@
+{
+  "name": "Research Paper Pipeline - MVP",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1504,
+        224
+      ],
+      "id": "3bf61e72-857a-4968-aabf-2371a636d79e",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "76ff3b7c-98c6-4471-b5cb-ccdf2e2c43f8",
+              "name": "topic",
+              "value": "Quantum computing in drug discovery",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -1344,
+        -368
+      ],
+      "id": "56189ede-032f-452b-a849-6ce3c0460070",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "url": "https://export.arxiv.org/api/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search_query",
+              "value": "={{ \"ti:\" + $json.topic }}"
+            },
+            {
+              "name": "start",
+              "value": "0"
+            },
+            {
+              "name": "max_results",
+              "value": "5"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -1136,
+        224
+      ],
+      "id": "e80e8177-11ea-4931-a8de-840487c1cd7e",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.xml",
+      "typeVersion": 1,
+      "position": [
+        -944,
+        -368
+      ],
+      "id": "aa0a845e-54af-4695-9860-739061fd7ef8",
+      "name": "Parse arXiv Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const feed = $input.first().json.feed;\n\nconst entries = feed.entry || [];\n\nreturn entries.map(paper => ({\n  json: {\n    title: paper.title,\n    abstract: paper.summary,\n    published: paper.published,\n    updated: paper.updated,\n    authors: paper.author,\n    id: paper.id,\n    url: paper.link\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        192
+      ],
+      "id": "157f7e2d-5d1a-4dae-b5af-5b99367afbce",
+      "name": "Extract Papers"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const paper = $json;\n\nconst authors = Array.isArray(paper.authors)\n  ? paper.authors.map(author => author.name).join(', ')\n  : '';\n\nreturn {\n  json: {\n    title: paper.title,\n    abstract: paper.abstract,\n    authors: authors,\n    published: paper.published,\n    updated: paper.updated,\n    id: paper.id,\n    url: paper.url\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -576,
+        -368
+      ],
+      "id": "15cf88f1-13ac-431c-b76c-2ba23fcf4038",
+      "name": "Clean Paper Data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n \"model\": \"openrouter/free\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify(\n        \"Analyze this research paper.\\n\\n\" +\n        \"Title: \" + $json.title + \"\\n\\n\" +\n        \"Authors: \" + $json.authors + \"\\n\\n\" +\n        \"Published: \" + $json.published + \"\\n\\n\" +\n        \"Abstract:\\n\" + $json.abstract + \"\\n\\n\" +\n        \"Give the answer in a clean and simple format.\\n\\n\" +\n        \"KEY FINDINGS:\\n\" +\n        \"- List the important findings as simple bullet points.\\n\\n\" +\n        \"METHODS USED:\\n\" +\n        \"- List the research methods as simple bullet points.\\n\\n\" +\n        \"DATASETS:\\n\" +\n        \"- List the datasets or data sources as simple bullet points.\\n\\n\" +\n        \"RESEARCH GAPS:\\n\" +\n        \"- List the research gaps as simple bullet points.\\n\\n\" +\n        \"SUMMARY:\\n\" +\n        \"Write a clear 3-5 sentence summary.\\n\\n\" +\n        \"If something is not specified, write Not specified.\\n\" +\n        \"Do not include reasoning or extra explanations.\"\n      ) }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -400,
+        144
+      ],
+      "id": "1f207d32-37cd-4c0f-a7f0-dde164b9635c",
+      "name": "Analyze Paper - Nemotron",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "kVNl9MdYfU7Dgeu6",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nfunction cleanText(text) {\n  if (!text) {\n    return \"Not specified\";\n  }\n\n  let value = String(text);\n\n  value = value.replace(/\\*\\*/g, \"\");\n  value = value.replace(/^#+\\s*/gm, \"\");\n  value = value.replace(/^\\s*[-•]\\s*/gm, \"\");\n  value = value.replace(/^\\s*['\"`]+/gm, \"\");\n  value = value.replace(/[ \\t]+/g, \" \");\n  value = value.replace(/\\n\\s*\\n+/g, \"\\n\");\n\n  return value.trim() || \"Not specified\";\n}\n\nreturn items.map(item => {\n  const data = item.json;\n\n  let analysis = \"\";\n\n  if (\n    data.choices &&\n    data.choices[0] &&\n    data.choices[0].message &&\n    data.choices[0].message.content\n  ) {\n    analysis = data.choices[0].message.content;\n  }\n\n  return {\n    json: {\n      analysis: cleanText(analysis)\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        -400
+      ],
+      "id": "4daf8bc9-5efa-4e92-8608-ae29a91272fd",
+      "name": "Clean AI Analysis"
+    },
+    {
+      "parameters": {
+        "jsCode": "const analysisItems = $input.all();\nconst paperItems = $('Clean Paper Data').all();\n\nreturn analysisItems.map((item, index) => {\n  const analysis = item.json.analysis || \"\";\n  const paper = paperItems[index]?.json || {};\n\n  const keyFindings =\n    analysis.match(/KEY FINDINGS:\\s*([\\s\\S]*?)(?=\\nMETHODS USED:|$)/i)?.[1]?.trim() || \"Not specified\";\n\n  const methods =\n    analysis.match(/METHODS USED:\\s*([\\s\\S]*?)(?=\\nDATASETS:|$)/i)?.[1]?.trim() || \"Not specified\";\n\n  const datasets =\n    analysis.match(/DATASETS:\\s*([\\s\\S]*?)(?=\\nRESEARCH GAPS:|$)/i)?.[1]?.trim() || \"Not specified\";\n\n  const researchGaps =\n    analysis.match(/RESEARCH GAPS:\\s*([\\s\\S]*?)(?=\\nSUMMARY:|$)/i)?.[1]?.trim() || \"Not specified\";\n\n  const summary =\n    analysis.match(/SUMMARY:\\s*([\\s\\S]*?)$/i)?.[1]?.trim() || \"Not specified\";\n\n  return {\n    json: {\n      title: paper.title || \"Not specified\",\n      authors: paper.authors || \"Not specified\",\n      published: paper.published || \"Not specified\",\n      updated: paper.updated || \"Not specified\",\n      id: paper.id || \"Not specified\",\n      url: paper.url || \"Not specified\",\n\n      key_findings: keyFindings,\n      methods_used: methods,\n      datasets: datasets,\n      research_gaps: researchGaps,\n      summary: summary\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -64,
+        208
+      ],
+      "id": "ed00f519-5f70-44d0-b1a8-8603c5644d1a",
+      "name": "Format Final Output"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nfunction cleanText(value) {\n  if (value === null || value === undefined) {\n    return \"Not specified\";\n  }\n\n  let text = String(value).trim();\n\n  if (!text) {\n    return \"Not specified\";\n  }\n\n  // Prevent Excel from treating text as a formula\n  if (/^[=+\\-@]/.test(text)) {\n    text = \"'\" + text;\n  }\n\n  return text;\n}\n\nreturn items.map(item => {\n  const url = item.json.url;\n\n  let paperUrl = \"Not specified\";\n\n  if (Array.isArray(url)) {\n    const htmlUrl = url.find(x => x?.type === \"text/html\");\n    paperUrl = htmlUrl?.href || url[0]?.href || \"Not specified\";\n  } else if (typeof url === \"string\") {\n    paperUrl = url;\n  }\n\n  return {\n    json: {\n      title: cleanText(item.json.title),\n      authors: cleanText(item.json.authors),\n      published: cleanText(item.json.published),\n      updated: cleanText(item.json.updated),\n      id: cleanText(item.json.id),\n      url: cleanText(paperUrl),\n\n      key_findings: cleanText(item.json.key_findings),\n      methods_used: cleanText(item.json.methods_used),\n      datasets: cleanText(item.json.datasets),\n      research_gaps: cleanText(item.json.research_gaps),\n      summary: cleanText(item.json.summary)\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        -400
+      ],
+      "id": "90fc092b-87b3-46d4-b6a8-7ee612c9da92",
+      "name": "Final Paper Data"
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        416,
+        -464
+      ],
+      "id": "8b976887-6b2a-40f4-ab2b-29f2d3c5cfb4",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst papers = items.map((item, index) => ({\n  paper_number: index + 1,\n  title: item.json.title || \"Not specified\",\n  authors: item.json.authors || \"Not specified\",\n  published: item.json.published || \"Not specified\",\n  url: item.json.url || \"Not specified\",\n\n  key_findings: item.json.key_findings || \"Not specified\",\n  methods_used: item.json.methods_used || \"Not specified\",\n  datasets: item.json.datasets || \"Not specified\",\n  research_gaps: item.json.research_gaps || \"Not specified\",\n  summary: item.json.summary || \"Not specified\"\n}));\n\nreturn [\n  {\n    json: {\n      paper_count: papers.length,\n      papers: papers\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        192
+      ],
+      "id": "4cd16105-14ce-4d0f-995e-48baaacadd52",
+      "name": "Prepare Papers for Comparison"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    model: \"nvidia/nemotron-3-ultra-550b-a55b:free\",\n\n    response_format: {\n      type: \"json_object\"\n    },\n\n    messages: [\n      {\n        role: \"user\",\n        content:\n          \"Compare these research papers.\\n\\n\" +\n\n          \"PAPERS:\\n\" +\n          JSON.stringify($json.papers, null, 2) +\n          \"\\n\\n\" +\n\n          \"Analyze all papers carefully.\\n\" +\n          \"Compare their findings, methods, datasets, differences, limitations, research trends, and unresolved research areas.\\n\\n\" +\n\n          \"IMPORTANT:\\n\" +\n          \"Do not treat a problem mentioned in a paper as a research gap automatically.\\n\" +\n          \"Do not simply repeat the abstract.\\n\" +\n          \"Only identify an unresolved research gap when it is supported by evidence from the papers.\\n\" +\n          \"Clearly distinguish limitations from genuine research gaps.\\n\" +\n          \"If there is not enough evidence, write Not specified.\\n\\n\" +\n\n          \"Return ONLY valid JSON.\\n\" +\n          \"Do not include reasoning.\\n\" +\n          \"Do not include markdown.\\n\" +\n          \"Do not include ```json.\\n\\n\" +\n\n          \"Use exactly these fields:\\n\" +\n          \"{\\n\" +\n          \"  \\\"common_findings\\\": \\\"\\\",\\n\" +\n          \"  \\\"methods_comparison\\\": \\\"\\\",\\n\" +\n          \"  \\\"dataset_comparison\\\": \\\"\\\",\\n\" +\n          \"  \\\"key_differences\\\": \\\"\\\",\\n\" +\n          \"  \\\"common_limitations\\\": \\\"\\\",\\n\" +\n          \"  \\\"research_trends\\\": \\\"\\\",\\n\" +\n          \"  \\\"overall_comparison_summary\\\": \\\"\\\"\\n\" +\n          \"}\"\n      }\n    ]\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        416,
+        -192
+      ],
+      "id": "fbaf5f51-6087-421b-9779-83af42cd98e6",
+      "name": "Compare Papers",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "19tjMIkxpRpFaRfI",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json;\n\n  let text = \"\";\n\n  // Model ke different possible output locations check karo\n  if (data.choices?.[0]?.message?.content) {\n    text = data.choices[0].message.content;\n  } \n  else if (data.reasoning?.text) {\n    text = data.reasoning.text;\n  }\n  else if (data.svgtext) {\n    text = data.svgtext;\n  }\n\n  // Markdown JSON fences remove karo\n  text = String(text)\n    .replace(/```json/gi, \"\")\n    .replace(/```/g, \"\")\n    .trim();\n\n  // JSON object find karo\n  const start = text.indexOf(\"{\");\n  const end = text.lastIndexOf(\"}\");\n\n  if (start !== -1 && end !== -1) {\n    text = text.substring(start, end + 1);\n  }\n\n  let comparison;\n\n  try {\n    comparison = JSON.parse(text);\n  } catch (error) {\n    comparison = {\n      common_findings: \"Not specified\",\n      methods_comparison: \"Not specified\",\n      dataset_comparison: \"Not specified\",\n      key_differences: \"Not specified\",\n      common_limitations: \"Not specified\",\n      research_trends: \"Not specified\",\n      overall_comparison_summary: text || \"Not specified\"\n    };\n  }\n\n  return {\n    json: comparison\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        192
+      ],
+      "id": "aa5640f0-988c-4336-8300-7e2f0f0fff6a",
+      "name": "Clean Compare Papers"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    model: \"nvidia/nemotron-3-ultra-550b-a55b:free\",\n\n    messages: [\n      {\n        role: \"user\",\n\n        content:\n          \"Identify the overall research gap from the comparison of these research papers.\\n\\n\" +\n\n          \"PAPER COMPARISON:\\n\" +\n          JSON.stringify($json, null, 2) +\n          \"\\n\\n\" +\n\n          \"IMPORTANT RESEARCH GAP RULES:\\n\" +\n          \"1. Do not simply repeat a problem mentioned in the papers.\\n\" +\n          \"2. Do not treat every limitation as a research gap.\\n\" +\n          \"3. Identify an unresolved gap only when supported by the comparison.\\n\" +\n          \"4. Look for what existing approaches still fail to address adequately.\\n\" +\n          \"5. Prefer gaps that appear across multiple papers or reveal a clear missing capability.\\n\" +\n          \"6. If the evidence is insufficient, write Not specified.\\n\" +\n          \"7. Do not invent facts, datasets, methods, or limitations.\\n\\n\" +\n\n          \"Return ONLY valid JSON with exactly these fields:\\n\" +\n          \"{\\n\" +\n          \"  \\\"overall_research_gap\\\": \\\"\\\",\\n\" +\n          \"  \\\"evidence_from_papers\\\": \\\"\\\",\\n\" +\n          \"  \\\"why_this_gap_matters\\\": \\\"\\\",\\n\" +\n          \"  \\\"confidence\\\": \\\"High/Medium/Low\\\"\\n\" +\n          \"}\\n\\n\" +\n\n          \"Do not include reasoning.\\n\" +\n          \"Do not include markdown.\\n\" +\n          \"Do not include ```json.\"\n      }\n    ]\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        640,
+        -288
+      ],
+      "id": "5553ead2-e7e9-4209-b19d-760fb43536f4",
+      "name": "Overall Research Gap",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cWYhY0yVkYWEMhke",
+          "name": "Header Auth account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json;\n\n  let text = \"\";\n\n  if (data.choices?.[0]?.message?.content) {\n    text = data.choices[0].message.content;\n  } \n  else if (data.reasoning?.text) {\n    text = data.reasoning.text;\n  }\n  else if (data.svgtext) {\n    text = data.svgtext;\n  }\n\n  text = String(text)\n    .replace(/```json/gi, \"\")\n    .replace(/```/g, \"\")\n    .trim();\n\n  const start = text.indexOf(\"{\");\n  const end = text.lastIndexOf(\"}\");\n\n  if (start !== -1 && end !== -1) {\n    text = text.substring(start, end + 1);\n  }\n\n  let gap;\n\n  try {\n    gap = JSON.parse(text);\n  } catch (error) {\n    gap = {\n      overall_research_gap: \"Not specified\",\n      evidence_from_papers: \"Not specified\",\n      why_this_gap_matters: \"Not specified\",\n      confidence: \"Low\"\n    };\n  }\n\n  return {\n    json: gap\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -528
+      ],
+      "id": "73854756-918e-4362-b38f-a0dd1200adcc",
+      "name": "Clean Overall Research Gap"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    model: \"nvidia/nemotron-3-ultra-550b-a55b:free\",\n\n    messages: [\n      {\n        role: \"user\",\n\n        content:\n          \"Develop a proposed research direction based on the identified overall research gap.\\n\\n\" +\n\n          \"OVERALL RESEARCH GAP:\\n\" +\n          JSON.stringify($json, null, 2) +\n          \"\\n\\n\" +\n\n          \"Your task is to propose a realistic and research-worthy direction that directly addresses this gap.\\n\\n\" +\n\n          \"IMPORTANT:\\n\" +\n          \"1. The proposed direction must directly address the identified research gap.\\n\" +\n          \"2. Do not simply repeat existing papers.\\n\" +\n          \"3. Do not invent unsupported results.\\n\" +\n          \"4. Clearly explain what would be new or improved.\\n\" +\n          \"5. If a dataset is not known or cannot be confidently recommended, write Not specified.\\n\\n\" +\n\n          \"Return ONLY valid JSON with exactly these fields:\\n\" +\n          \"{\\n\" +\n          \"  \\\"proposed_research_topic\\\": \\\"\\\",\\n\" +\n          \"  \\\"research_objective\\\": \\\"\\\",\\n\" +\n          \"  \\\"proposed_methodology\\\": \\\"\\\",\\n\" +\n          \"  \\\"possible_datasets\\\": \\\"\\\",\\n\" +\n          \"  \\\"expected_contribution\\\": \\\"\\\",\\n\" +\n          \"  \\\"potential_novelty\\\": \\\"\\\",\\n\" +\n          \"  \\\"evaluation_plan\\\": \\\"\\\"\\n\" +\n          \"}\\n\\n\" +\n\n          \"Do not include reasoning.\\n\" +\n          \"Do not include markdown.\\n\" +\n          \"Do not include ```json.\"\n      }\n    ]\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        896,
+        144
+      ],
+      "id": "303656ac-4267-49ac-8c90-6170f1357d5e",
+      "name": "Proposed Research Direction",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cWYhY0yVkYWEMhke",
+          "name": "Header Auth account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json;\n\n  let text = \"\";\n\n  if (data.choices?.[0]?.message?.content) {\n    text = data.choices[0].message.content;\n  }\n  else if (data.reasoning?.text) {\n    text = data.reasoning.text;\n  }\n  else if (data.svgtext) {\n    text = data.svgtext;\n  }\n\n  text = String(text)\n    .replace(/```json/gi, \"\")\n    .replace(/```/g, \"\")\n    .trim();\n\n  const start = text.indexOf(\"{\");\n  const end = text.lastIndexOf(\"}\");\n\n  if (start !== -1 && end !== -1) {\n    text = text.substring(start, end + 1);\n  }\n\n  let direction;\n\n  try {\n    direction = JSON.parse(text);\n  } catch (error) {\n    direction = {\n      proposed_research_topic: \"Not specified\",\n      research_objective: \"Not specified\",\n      proposed_methodology: \"Not specified\",\n      possible_datasets: \"Not specified\",\n      expected_contribution: \"Not specified\",\n      potential_novelty: \"Not specified\",\n      evaluation_plan: \"Not specified\"\n    };\n  }\n\n  return {\n    json: direction\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        -224
+      ],
+      "id": "8cad197d-b2b5-4003-884a-cd4708ab7234",
+      "name": "Clean Proposed Research Direction"
+    },
+    {
+      "parameters": {
+        "jsCode": "const papersData = $(\"Prepare Papers for Comparison\").first().json;\nconst comparison = $(\"Clean Compare Papers\").first().json;\nconst gap = $(\"Clean Overall Research Gap\").first().json;\nconst direction = $(\"Clean Proposed Research Direction\").first().json;\n\nconst papers = (papersData.papers || []).map(paper => ({\n  paper_number: paper.paper_number || 0,\n  title: paper.title || \"Not specified\",\n  authors: paper.authors || \"Not specified\",\n  published: paper.published || \"Not specified\",\n  url: paper.url || \"Not specified\",\n  key_findings: paper.key_findings || \"Not specified\",\n  methods_used: paper.methods_used || \"Not specified\",\n  datasets: paper.datasets || \"Not specified\",\n  research_gaps: paper.research_gaps || \"Not specified\",\n  summary: paper.summary || \"Not specified\"\n}));\n\nreturn [\n  {\n    json: {\n      paper_count: papers.length,\n      papers: papers,\n\n      comparison: {\n        common_findings: comparison.common_findings || \"Not specified\",\n        methods_comparison: comparison.methods_comparison || \"Not specified\",\n        dataset_comparison: comparison.dataset_comparison || \"Not specified\",\n        key_differences: comparison.key_differences || \"Not specified\",\n        common_limitations: comparison.common_limitations || \"Not specified\",\n        research_trends: comparison.research_trends || \"Not specified\",\n        overall_comparison_summary: comparison.overall_comparison_summary || \"Not specified\"\n      },\n\n      overall_gap: {\n        overall_research_gap: gap.overall_research_gap || \"Not specified\",\n        evidence_from_papers: gap.evidence_from_papers || \"Not specified\",\n        why_this_gap_matters: gap.why_this_gap_matters || \"Not specified\",\n        confidence: gap.confidence || \"Low\"\n      },\n\n      proposed_direction: {\n        proposed_research_topic: direction.proposed_research_topic || \"Not specified\",\n        research_objective: direction.research_objective || \"Not specified\",\n        proposed_methodology: direction.proposed_methodology || \"Not specified\",\n        possible_datasets: direction.possible_datasets || \"Not specified\",\n        expected_contribution: direction.expected_contribution || \"Not specified\",\n        potential_novelty: direction.potential_novelty || \"Not specified\",\n        evaluation_plan: direction.evaluation_plan || \"Not specified\"\n      }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        432
+      ],
+      "id": "226c48ec-2316-4781-9dcf-6d7c3b819438",
+      "name": "Prepare Final Report Data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    model: \"nvidia/nemotron-3-ultra-550b-a55b:free\",\n\n    messages: [\n      {\n        role: \"user\",\n        content:\n          \"Create a professional academic research literature review report using ONLY the supplied research data.\\n\\n\" +\n\n          \"RESEARCH DATA:\\n\" +\n          JSON.stringify($json, null, 2) +\n          \"\\n\\n\" +\n\n          \"REPORT STRUCTURE:\\n\" +\n          \"1. Title\\n\" +\n          \"2. Executive Summary\\n\" +\n          \"3. Papers Reviewed\\n\" +\n          \"4. Cross-Paper Comparison\\n\" +\n          \"5. Overall Research Gap\\n\" +\n          \"6. Evidence Supporting the Research Gap\\n\" +\n          \"7. Proposed Research Direction\\n\" +\n          \"8. Research Objective\\n\" +\n          \"9. Proposed Methodology\\n\" +\n          \"10. Possible Datasets\\n\" +\n          \"11. Expected Contribution\\n\" +\n          \"12. Potential Novelty\\n\" +\n          \"13. Evaluation Plan\\n\" +\n          \"14. Conclusion\\n\\n\" +\n\n          \"WRITING REQUIREMENTS:\\n\" +\n          \"- Write in professional academic English.\\n\" +\n          \"- Use clear headings and subheadings.\\n\" +\n          \"- Present the reviewed papers clearly.\\n\" +\n          \"- Compare the papers based on findings, methods, datasets, limitations, and trends.\\n\" +\n          \"- Clearly distinguish existing evidence from the proposed research direction.\\n\" +\n          \"- Do not invent facts, results, citations, datasets, or claims.\\n\" +\n          \"- If information is unavailable, write 'Not specified'.\\n\" +\n          \"- The research gap must be evidence-based and should not simply repeat a problem statement.\\n\" +\n          \"- The proposed research direction must directly address the identified gap.\\n\\n\" +\n\n          \"OUTPUT:\\n\" +\n          \"- Return ONLY Markdown.\\n\" +\n          \"- Do not include JSON.\\n\" +\n          \"- Do not include ```markdown or other code fences.\"\n      }\n    ]\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1200,
+        256
+      ],
+      "id": "cd4f3add-0a92-48c6-80ee-20564a90c30b",
+      "name": "Generate Final Report",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cWYhY0yVkYWEMhke",
+          "name": "Header Auth account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json;\n\n  let report = \"\";\n\n  if (data.choices?.[0]?.message?.content) {\n    report = data.choices[0].message.content;\n  }\n  else if (data.svgchoices?.[0]?.message?.content) {\n    report = data.svgchoices[0].message.content;\n  }\n  else if (data.reasoning?.text) {\n    report = data.reasoning.text;\n  }\n  else if (data.svgcontent) {\n    report = data.svgcontent;\n  }\n\n  report = String(report)\n    .replace(/```markdown/gi, \"\")\n    .replace(/```/g, \"\")\n    .trim();\n\n  return {\n    json: {\n      final_report: report\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        16
+      ],
+      "id": "c192ca32-d7f8-4fac-97fa-b9345520b5c2",
+      "name": "Clean Final Report"
+    },
+    {
+      "parameters": {
+        "jsCode": "const report = $json.final_report || \"\";\n\nconst html = `\n<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n<title>Research Literature Review Report</title>\n<style>\nbody {\n  font-family: Arial, sans-serif;\n  line-height: 1.6;\n  max-width: 1000px;\n  margin: 40px auto;\n  padding: 20px;\n}\nh1 {\n  font-size: 28px;\n  margin-bottom: 25px;\n}\nh2 {\n  margin-top: 30px;\n}\n</style>\n</head>\n<body>\n\n${report\n  .replace(/^# (.*)$/gm, \"<h1>$1</h1>\")\n  .replace(/^## (.*)$/gm, \"<h2>$1</h2>\")\n  .replace(/\\n\\n/g, \"<p></p>\")\n  .replace(/\\n/g, \"<br>\")\n}\n\n</body>\n</html>\n`;\n\nreturn [\n  {\n    json: {\n      report_html: html\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        16
+      ],
+      "id": "6762d666-3d1c-4fa0-a054-4a0d891f21b6",
+      "name": "Format Report as HTML"
+    },
+    {
+      "parameters": {
+        "operation": "html",
+        "binaryPropertyName": "={{ $json.report_html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1776,
+        16
+      ],
+      "id": "1b0f6f7c-fd10-452a-97e3-522563412aae",
+      "name": "Convert to File1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -1216,
+        480
+      ],
+      "id": "de085b2b-5178-4241-a77d-c070eb591dc9",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "68a44ce6-8086-45f3-adfd-7cb45e44ac08",
+              "name": "topic",
+              "value": "artificial intelligence",
+              "type": "string"
+            },
+            {
+              "id": "1a9c9a9f-6473-48aa-8c86-6b14607b6bc2",
+              "name": "days_back",
+              "value": "7",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -1040,
+        1136
+      ],
+      "id": "6aeb9d07-b854-417c-b3ad-b463d705ee71",
+      "name": "Weekly Settings"
+    },
+    {
+      "parameters": {
+        "url": "https://export.arxiv.org/api/query",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "search_query",
+              "value": "=all:\"{{$json.topic}}\""
+            },
+            {
+              "name": "start",
+              "value": "0"
+            },
+            {
+              "name": "max_results",
+              "value": "5"
+            },
+            {
+              "name": "sortBy",
+              "value": "submittedDate"
+            },
+            {
+              "name": "sortOrder",
+              "value": "descending"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -752,
+        592
+      ],
+      "id": "f2e43083-f361-4dc9-b6fa-9d766b320404",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.xml",
+      "typeVersion": 1,
+      "position": [
+        -528,
+        1120
+      ],
+      "id": "26ed01a7-b15c-47c3-b12a-a57bf374c9db",
+      "name": "XML"
+    },
+    {
+      "parameters": {
+        "jsCode": "const feed = $json.feed || {};\nconst entries = feed.entry || [];\n\nconst papers = Array.isArray(entries) ? entries : [entries];\n\nreturn papers.map((paper, index) => {\n\n  const links = Array.isArray(paper.link)\n    ? paper.link\n    : [paper.link];\n\n  const htmlLink = links.find(\n    link => link?.href && link?.type === \"text/html\"\n  );\n\n  const authors = Array.isArray(paper.author)\n    ? paper.author\n        .map(author => author?.name)\n        .filter(Boolean)\n        .join(\", \")\n    : \"Not specified\";\n\n  return {\n    json: {\n      paper_number: index + 1,\n      title: paper.title || \"Not specified\",\n      authors: authors,\n      published: paper.published || \"Not specified\",\n      updated: paper.updated || \"Not specified\",\n      id: paper.id || \"Not specified\",\n      url: htmlLink?.href || \"Not specified\",\n      summary: paper.summary || \"Not specified\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        528
+      ],
+      "id": "c12bb7e9-68d0-4a97-a046-d1b5ac7bbb7d",
+      "name": "Extract Weekly Papers"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst sevenDaysAgo = new Date(now);\nsevenDaysAgo.setDate(now.getDate() - 7);\n\nconst items = $input.all();\n\nreturn items.filter(item => {\n  const published = item.json.svgpublished || item.json.published;\n\n  if (!published) {\n    return false;\n  }\n\n  const publishedDate = new Date(published);\n\n  return publishedDate >= sevenDaysAgo && publishedDate <= now;\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        976
+      ],
+      "id": "8453636d-d123-400e-bbe5-0c1a30b8c536",
+      "name": "Filter Last 7 Days"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"nvidia/nemotron-3-ultra-550b-a55b:free\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a research monitoring assistant. Analyze the supplied research paper carefully. Identify what is new, the key problem, unresolved issues, and useful research opportunities. Be conservative and do not invent information that is not supported by the paper.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify(\n        \"Analyze this research paper:\\n\\n\" +\n        \"Title: \" + ($json.title || \"Not specified\") + \"\\n\" +\n        \"Authors: \" + ($json.authors || \"Not specified\") + \"\\n\" +\n        \"Published: \" + ($json.published || \"Not specified\") + \"\\n\" +\n        \"URL: \" + ($json.url || \"Not specified\") + \"\\n\" +\n        \"Summary: \" + ($json.summary || \"Not specified\") + \"\\n\\n\" +\n\n        \"Return ONLY valid JSON in exactly this structure:\\n\" +\n        \"{\\n\" +\n        '  \"what_is_new\": \"What is new or important in this paper\",\\n' +\n        '  \"key_problem\": \"Main problem addressed by the paper\",\\n' +\n        '  \"unsolved_issues\": \"Important issues that remain unresolved\",\\n' +\n        '  \"research_opportunity\": \"A realistic research opportunity based only on this paper\"\\n' +\n        \"}\"\n      ) }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        208,
+        544
+      ],
+      "id": "1a96dd43-28c3-4f59-979e-7b8464ee1bc9",
+      "name": "Weekly AI Analysis",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cWYhY0yVkYWEMhke",
+          "name": "Header Auth account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiItems = $(\"Clean Weekly AI Analysis\").all();\nconst originalPapers = $(\"Filter Last 7 Days\").all();\n\nconst papers = aiItems.map((item, index) => {\n  const ai = item.json;\n  const paper = originalPapers[index]?.json || {};\n\n  return {\n    paper_number: index + 1,\n\n    title: paper.title || \"Not specified\",\n    authors: paper.authors || \"Not specified\",\n    published: paper.published || \"Not specified\",\n    url: paper.url || \"Not specified\",\n\n    what_is_new: ai.what_is_new || \"Not specified\",\n    key_problem: ai.key_problem || \"Not specified\",\n    unsolved_issues: ai.unsolved_issues || \"Not specified\",\n    research_opportunity: ai.research_opportunity || \"Not specified\"\n  };\n});\n\nreturn [\n  {\n    json: {\n      paper_count: papers.length,\n      papers: papers\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        992
+      ],
+      "id": "040c8710-3662-4d17-a59f-2f4a934c9780",
+      "name": "Prepare Weekly Digest"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json;\n\n  let text = \"\";\n\n  if (data.choices?.[0]?.message?.content) {\n    text = data.choices[0].message.content;\n  } else if (data.svgchoices?.[0]?.svgcontent) {\n    text = data.svgchoices[0].svgcontent;\n  }\n\n  text = String(text)\n    .replace(/```json/gi, \"\")\n    .replace(/```/g, \"\")\n    .trim();\n\n  const start = text.indexOf(\"{\");\n  const end = text.lastIndexOf(\"}\");\n\n  if (start !== -1 && end !== -1) {\n    text = text.substring(start, end + 1);\n  }\n\n  let analysis;\n\n  try {\n    analysis = JSON.parse(text);\n  } catch (error) {\n    analysis = {};\n  }\n\n  return {\n    json: {\n      title: data.title || data.svgtitle || \"Not specified\",\n      authors: data.authors || data.svgauthors || \"Not specified\",\n      published: data.published || data.svgpublished || \"Not specified\",\n      url: data.url || data.svgurl || \"Not specified\",\n\n      what_is_new: analysis.what_is_new || \"Not specified\",\n      key_problem: analysis.key_problem || \"Not specified\",\n      unsolved_issues: analysis.unsolved_issues || \"Not specified\",\n      research_opportunity: analysis.research_opportunity || \"Not specified\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        992
+      ],
+      "id": "17da5e0f-8a72-42db-8c58-3b5049ca9c99",
+      "name": "Clean Weekly AI Analysis"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $json;\n\nlet text = data.choices?.[0]?.message?.content || \"\";\n\ntext = String(text)\n  .replace(/```json/gi, \"\")\n  .replace(/```/g, \"\")\n  .trim();\n\nlet digest = {};\n\nconst start = text.indexOf(\"{\");\nconst end = text.lastIndexOf(\"}\");\n\nif (start !== -1 && end !== -1) {\n  try {\n    digest = JSON.parse(text.substring(start, end + 1));\n  } catch (error) {\n    digest = {};\n  }\n}\n\nfunction escapeHtml(value) {\n  return String(value || \"Not specified\")\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\");\n}\n\nconst html = `\n<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n<title>Weekly Research Digest</title>\n<style>\nbody {\n  font-family: Arial, sans-serif;\n  line-height: 1.6;\n  max-width: 1000px;\n  margin: 40px auto;\n  padding: 20px;\n}\nh1 {\n  font-size: 30px;\n}\nh2 {\n  margin-top: 30px;\n}\n.meta {\n  background: #f5f5f5;\n  padding: 15px;\n  margin-bottom: 25px;\n}\n.section {\n  margin-bottom: 25px;\n}\n</style>\n</head>\n\n<body>\n\n<h1>Weekly Research Digest</h1>\n\n<div class=\"meta\">\n  <strong>Week:</strong> ${escapeHtml(digest.week)}<br>\n  <strong>Topic:</strong> ${escapeHtml(digest.topic)}<br>\n  <strong>New Papers:</strong> ${escapeHtml(digest.new_papers)}\n</div>\n\n<div class=\"section\">\n  <h2>Breakthroughs</h2>\n  <p>${escapeHtml(digest.breakthroughs)}</p>\n</div>\n\n<div class=\"section\">\n  <h2>Emerging Problems</h2>\n  <p>${escapeHtml(digest.emerging_problems)}</p>\n</div>\n\n<div class=\"section\">\n  <h2>Unsolved Issues</h2>\n  <p>${escapeHtml(digest.unsolved_issues)}</p>\n</div>\n\n<div class=\"section\">\n  <h2>Recommendations</h2>\n  <p>${escapeHtml(digest.recommendations)}</p>\n</div>\n\n</body>\n</html>\n`;\n\nreturn [{\n  json: {\n    report_html: html\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        592
+      ],
+      "id": "5431beef-3bf8-42ac-b67c-91b9008fc30a",
+      "name": "Format Weekly Digest as HTML"
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "report_html",
+        "options": {
+          "fileName": "weekly-research-digest.html"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1344,
+        592
+      ],
+      "id": "9e5c9ac7-0b22-41ee-932f-0104bffef630",
+      "name": "weekly-research-digest.html"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"nvidia/nemotron-3-ultra-550b-a55b:free\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert research monitoring assistant. Analyze the weekly collection of research papers and produce a concise, evidence-based weekly research digest. Do not invent information. Identify genuine breakthroughs, emerging problems, unresolved issues, trends, and practical research recommendations.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify(\n        \"Create a weekly research digest from the following papers.\\n\\n\" +\n        JSON.stringify($json.papers, null, 2) +\n        \"\\n\\nReturn ONLY valid JSON with exactly these fields:\\n\" +\n        \"{\\n\" +\n        '  \"week\": \"\",\\n' +\n        '  \"topic\": \"artificial intelligence\",\\n' +\n        '  \"new_papers\": \"\",\\n' +\n        '  \"breakthroughs\": \"\",\\n' +\n        '  \"emerging_problems\": \"\",\\n' +\n        '  \"unsolved_issues\": \"\",\\n' +\n        '  \"recommendations\": \"\"\\n' +\n        \"}\"\n      ) }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        672,
+        592
+      ],
+      "id": "91a9e237-0d3d-4f87-9f68-10bae67d39d6",
+      "name": "Generate Weekly Digest",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cWYhY0yVkYWEMhke",
+          "name": "Header Auth account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json;\n\n  let text = data.choices?.[0]?.message?.content || \"\";\n\n  text = String(text)\n    .replace(/```json/gi, \"\")\n    .replace(/```/g, \"\")\n    .trim();\n\n  let digest = {};\n\n  const start = text.indexOf(\"{\");\n  const end = text.lastIndexOf(\"}\");\n\n  if (start !== -1 && end !== -1) {\n    try {\n      digest = JSON.parse(text.substring(start, end + 1));\n    } catch (error) {}\n  }\n\n  return {\n    json: {\n      week: digest.week || \"Not specified\",\n      topic: digest.topic || \"Not specified\",\n      new_papers: digest.new_papers || \"Not specified\",\n      breakthroughs: digest.breakthroughs || \"Not specified\",\n      emerging_problems: digest.emerging_problems || \"Not specified\",\n      unsolved_issues: digest.unsolved_issues || \"Not specified\",\n      recommendations: digest.recommendations || \"Not specified\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        816
+      ],
+      "id": "937b079b-171b-4455-b74b-7535f1d44cb1",
+      "name": "Clean Weekly Digest"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Parse arXiv Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse arXiv Response": {
+      "main": [
+        [
+          {
+            "node": "Extract Papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Papers": {
+      "main": [
+        [
+          {
+            "node": "Clean Paper Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Paper Data": {
+      "main": [
+        [
+          {
+            "node": "Analyze Paper - Nemotron",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Paper - Nemotron": {
+      "main": [
+        [
+          {
+            "node": "Clean AI Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean AI Analysis": {
+      "main": [
+        [
+          {
+            "node": "Format Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Final Output": {
+      "main": [
+        [
+          {
+            "node": "Final Paper Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Paper Data": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Papers for Comparison",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Papers for Comparison": {
+      "main": [
+        [
+          {
+            "node": "Compare Papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare Papers": {
+      "main": [
+        [
+          {
+            "node": "Clean Compare Papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Compare Papers": {
+      "main": [
+        [
+          {
+            "node": "Overall Research Gap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Overall Research Gap": {
+      "main": [
+        [
+          {
+            "node": "Clean Overall Research Gap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Overall Research Gap": {
+      "main": [
+        [
+          {
+            "node": "Proposed Research Direction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proposed Research Direction": {
+      "main": [
+        [
+          {
+            "node": "Clean Proposed Research Direction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Proposed Research Direction": {
+      "main": [
+        [
+          {
+            "node": "Prepare Final Report Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Final Report Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Final Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Final Report": {
+      "main": [
+        [
+          {
+            "node": "Clean Final Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Final Report": {
+      "main": [
+        [
+          {
+            "node": "Format Report as HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Report as HTML": {
+      "main": [
+        [
+          {
+            "node": "Convert to File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Weekly Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Settings": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "XML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "XML": {
+      "main": [
+        [
+          {
+            "node": "Extract Weekly Papers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Weekly Papers": {
+      "main": [
+        [
+          {
+            "node": "Filter Last 7 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Last 7 Days": {
+      "main": [
+        [
+          {
+            "node": "Weekly AI Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly AI Analysis": {
+      "main": [
+        [
+          {
+            "node": "Clean Weekly AI Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Weekly AI Analysis": {
+      "main": [
+        [
+          {
+            "node": "Prepare Weekly Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Weekly Digest": {
+      "main": [
+        [
+          {
+            "node": "Generate Weekly Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Weekly Digest as HTML": {
+      "main": [
+        [
+          {
+            "node": "weekly-research-digest.html",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Weekly Digest": {
+      "main": [
+        [
+          {
+            "node": "Format Weekly Digest as HTML",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Clean Weekly Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File1": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "afbf3562-fa1b-4923-8c01-7decffa4d429",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "81e2488cb366c24dd02abff668ed545ec5c6410c1f92a2df6c913291111e2ba8"
+  },
+  "nodeGroups": [],
+  "id": "Ie3EWex8X3AvtYom",
+  "tags": []
+}
